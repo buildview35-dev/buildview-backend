@@ -1,13 +1,12 @@
-import express from 'express'
-import cors from 'cors'
-import nodemailer from 'nodemailer'
-import bodyParser from 'body-parser'
+const express = require('express')
+const cors = require('cors')
+const nodemailer = require('nodemailer')
+const bodyParser = require('body-parser')
 
 const app = express()
 app.use(cors())
 app.use(bodyParser.json())
 
-// Create transporter (Gmail example — use App Password)
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -16,7 +15,6 @@ const transporter = nodemailer.createTransport({
   }
 })
 
-// Send verification code
 app.post('/api/send-code', async (req, res) => {
   const { email, code } = req.body
 
