@@ -7,26 +7,21 @@ require('dotenv').config()
 
 const app = express()
 const allow = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean)
-const allowAnyDev5173 = (origin) => {
-  try {
-    const u = new URL(origin)
-    const isHttp = u.protocol === 'http:' || u.protocol === 'https:'
-    return isHttp && u.port === '5173'
-  } catch { return false }
-}
-app.use(cors({
+const isDevLocal = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)
+const isLANDev = (origin) => /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/i.test(origin)
+const corsOptions = {
   origin: function (origin, cb) {
-    if (
-      !origin ||
-      allow.length === 0 ||
-      allow.includes('*') ||
-      allow.includes(origin) ||
-      allowAnyDev5173(origin) ||
-      origin === 'capacitor://localhost'
-    ) cb(null, true)
-    else cb(new Error('Not allowed by CORS'), false)
-  }
-}))
+    if (!origin) return cb(null, true)
+    if (allow.length === 0 || allow.includes('*')) return cb(null, true)
+    if (allow.includes(origin)) return cb(null, true)
+    if (isDevLocal(origin) || isLANDev(origin) || origin === 'capacitor://localhost') return cb(null, true)
+    // Soft block (no error), browser will enforce CORS
+    return cb(null, false)
+  },
+  optionsSuccessStatus: 200
+}
+app.use(cors(corsOptions))
+app.options('*', cors(corsOptions))
 app.use(express.json())
 
 const PORT = process.env.PORT || process.env.MAIL_PORT || 5174
