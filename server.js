@@ -7,10 +7,24 @@ require('dotenv').config()
 
 const app = express()
 const allow = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean)
+const allowAnyDev5173 = (origin) => {
+  try {
+    const u = new URL(origin)
+    const isHttp = u.protocol === 'http:' || u.protocol === 'https:'
+    return isHttp && u.port === '5173'
+  } catch { return false }
+}
 app.use(cors({
   origin: function (origin, cb) {
-    if (!origin || allow.length === 0 || allow.includes('*') || allow.includes(origin)) cb(null, true)
-    else cb(null, false)
+    if (
+      !origin ||
+      allow.length === 0 ||
+      allow.includes('*') ||
+      allow.includes(origin) ||
+      allowAnyDev5173(origin) ||
+      origin === 'capacitor://localhost'
+    ) cb(null, true)
+    else cb(new Error('Not allowed by CORS'), false)
   }
 }))
 app.use(express.json())
