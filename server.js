@@ -1,44 +1,62 @@
-const express = require('express')
-const cors = require('cors')
-const nodemailer = require('nodemailer')
-const bodyParser = require('body-parser')
+import express from "express";
+import cors from "cors";
+import morgan from "morgan";
+import multer from "multer";
+import { v2 as cloudinary } from "cloudinary";
 
-const app = express()
-app.use(cors())
-app.use(bodyParser.json())
+const app = express();
+const PORT = process.env.PORT || 8080;
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-})
+cloudinary.config({
+  secure: true
+});
 
-app.post('/api/send-code', async (req, res) => {
-  const { email, code } = req.body
+app.use(cors({ origin: "*", methods: ["GET", "POST"], allowedHeaders: ["Content-Type"] }));
+app.use(morgan("tiny"));
 
-  if (!email || !code) {
-    return res.status(400).json({ error: 'Missing email or code' })
-  }
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
 
+app.get("/health", (req, res) => {
+  res.json({ ok: true, cloudinaryConfigured: Boolean(process.env.CLOUDINARY_URL), version: "1.0.0" });
+});
+
+app.post("/upload", upload.single("image"), async (req, res) => {
   try {
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: 'Your Verification Code',
-      text: `Your verification code is: ${code}`,
-      html: `<p>Your verification code is:</p><h2>${code}</h2>`
-    })
+    if (!req.file) {
+      return res.status(400).json({ error: "No image file provided. Use form field 'image'." });
+    }
+    const folder = "buildview/avatars";
+    const publicId = `avatar_${Date.now()}`;
 
-    return res.json({ success: true })
+    const stream = cloudinary.uploader.upload_stream(
+      { folder, public_id: publicId, resource_type: "image" },
+      (error, result) => {
+        if (error) {
+          return res.status(500).json({ error: "Cloudinary upload failed", details: error.message });
+        }
+        return res.json({
+          secure_url: result.secure_url,
+          url: result.url,
+          public_id: result.public_id,
+          original_filename: req.file.originalname
+        });
+      }
+    );
+
+    stream.end(req.file.buffer);
   } catch (err) {
-    console.error(err)
-    return res.status(500).json({ error: 'Failed to send email' })
+    res.status(500).json({ error: "Unexpected server error", details: err.message });
   }
-})
+});
 
-const PORT = process.env.PORT || 3000
+app.use((req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
+
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
-})
+  console.log(`Server listening on port ${PORT}`);
+});
+
