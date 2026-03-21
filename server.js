@@ -43,6 +43,7 @@ app.use(cors({
 }));
 
 app.use(morgan("tiny"));
+app.use(express.json());
 
 /* -----------------------------
    Multer setup (memory upload)
