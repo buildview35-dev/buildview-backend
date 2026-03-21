@@ -131,7 +131,9 @@ app.post("/upload", upload.single("image"), async (req, res) => {
 const otpStore = new Map(); // Stores { email: { otp: string, expiresAt: number, verified: boolean } }
 
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true, // Use SSL
   auth: {
     user: "buildview35@gmail.com",
     pass: "dhhv xszx lctv zxof"
