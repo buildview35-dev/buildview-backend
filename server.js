@@ -3,9 +3,9 @@ import cors from "cors";
 import morgan from "morgan";
 import multer from "multer";
 import { v2 as cloudinary } from "cloudinary";
-import nodemailer from "nodemailer";
 import crypto from "crypto";
 import admin from "firebase-admin";
+import axios from "axios";
 
 // Initialize Firebase Admin (If serviceAccountKey.json is missing, this will fail or require env vars)
 // We'll wrap it in a try-catch so the server still boots for image uploads if the key is missing.
@@ -126,23 +126,16 @@ app.post("/upload", upload.single("image"), async (req, res) => {
 
 
 /* -----------------------------
-   OTP Store & Mailer Setup
+   OTP Store & EmailJS Config
 ----------------------------- */
 const otpStore = new Map(); // Stores { email: { otp: string, expiresAt: number, verified: boolean } }
 
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,          // TLS port
-  secure: false,      // TLS, not SSL
-  auth: {
-    user: "buildview35@gmail.com",
-    pass: "dhhv xszx lctv zxof"
-  },
-  tls: {
-    rejectUnauthorized: false
-  },
-  connectionTimeout: 60000
-});
+const emailjsConfig = {
+  serviceId: "service_jdf79hm",
+  templateId: "template_g67x3mp",
+  privateKey: "Hr7y90kpHXU97p32grVm4",
+  publicKey: "wKfRS2OvlD5r9ShaE"
+};
 
 /* -----------------------------
    OTP / Forgot Password Endpoints
@@ -158,25 +151,25 @@ app.post("/forgot-password", async (req, res) => {
 
     otpStore.set(email, { otp, expiresAt, verified: false });
 
-    // Send email
-    await transporter.sendMail({
-      from: '"BuildView Support" <buildview35@gmail.com>',
-      to: email,
-      subject: "Password Reset Code",
-      text: `Your password reset code is: ${otp}\nThis code will expire in 10 minutes.`,
-      html: `
-        <div style="font-family: sans-serif; padding: 20px; color: #333;">
-          <h2>Password Reset Request</h2>
-          <p>You requested to reset your password for BuildView.</p>
-          <p>Your 6-digit verification code is:</p>
-          <h1 style="color: #0055FF; letter-spacing: 5px; padding: 10px; background: #f0f4ff; display: inline-block; border-radius: 8px;">${otp}</h1>
-          <p>This code will expire in 10 minutes.</p>
-          <p>If you did not request this, please ignore this email.</p>
-        </div>
-      `
+    // Send email via EmailJS REST API
+    const response = await axios.post("https://api.emailjs.com/api/v1.0/email/send", {
+      service_id: emailjsConfig.serviceId,
+      template_id: emailjsConfig.templateId,
+      user_id: emailjsConfig.publicKey,
+      accessToken: emailjsConfig.privateKey,
+      template_params: {
+        otp: otp,
+        email: email,
+        name: "BuildView User",
+        title: "Password Reset"
+      }
     });
 
-    res.json({ success: true, message: "OTP sent successfully" });
+    if (response.status === 200) {
+      res.json({ success: true, message: "OTP sent successfully via EmailJS" });
+    } else {
+      throw new Error(`EmailJS Error: ${response.data}`);
+    }
   } catch (err) {
     console.error("Forgot Password Error:", err);
     res.status(500).json({ error: "Failed to process request", details: err.message });
