@@ -126,15 +126,14 @@ app.post("/upload", upload.single("image"), async (req, res) => {
 
 
 /* -----------------------------
-   OTP Store & EmailJS Config
+   OTP Store & Brevo Config
 ----------------------------- */
 const otpStore = new Map(); // Stores { email: { otp: string, expiresAt: number, verified: boolean } }
 
-const emailjsConfig = {
-  serviceId: "service_jdf79hm",
-  templateId: "template_g67x3mp",
-  privateKey: "Hr7y90kpHXU97p32grVm4",
-  publicKey: "wKfRS2OvlD5r9ShaE"
+const brevoConfig = {
+  apiKey: "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",
+  senderEmail: "candari.arvin@gmail.com",
+  senderName: "BuildView"
 };
 
 /* -----------------------------
@@ -151,28 +150,44 @@ app.post("/forgot-password", async (req, res) => {
 
     otpStore.set(email, { otp, expiresAt, verified: false });
 
-    // Send email via EmailJS REST API
-    const response = await axios.post("https://api.emailjs.com/api/v1.0/email/send", {
-      service_id: emailjsConfig.serviceId,
-      template_id: emailjsConfig.templateId,
-      user_id: emailjsConfig.publicKey,
-      accessToken: emailjsConfig.privateKey,
-      template_params: {
-        otp: otp,
-        email: email,
-        name: "BuildView User",
-        title: "Password Reset"
+    // Send email via Brevo HTTP API (works on Render; no SMTP needed).
+    const response = await axios.post(
+      "https://api.brevo.com/v3/smtp/email",
+      {
+        sender: {
+          email: brevoConfig.senderEmail,
+          name: brevoConfig.senderName
+        },
+        to: [{ email }],
+        subject: "BuildView Password Reset OTP",
+        htmlContent: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+            <h2>BuildView Password Reset</h2>
+            <p>Your one-time password is:</p>
+            <p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${otp}</p>
+            <p>This OTP will expire in 10 minutes.</p>
+          </div>
+        `
+      },
+      {
+        headers: {
+          "api-key": brevoConfig.apiKey,
+          Accept: "application/json",
+          "Content-Type": "application/json"
+        },
+        timeout: 10000
       }
-    });
+    );
 
-    if (response.status === 200) {
-      res.json({ success: true, message: "OTP sent successfully via EmailJS" });
+    if (response.status >= 200 && response.status < 300) {
+      res.json({ success: true, message: "OTP sent successfully via Brevo" });
     } else {
-      throw new Error(`EmailJS Error: ${response.data}`);
+      throw new Error(`Brevo Error: ${JSON.stringify(response.data)}`);
     }
   } catch (err) {
-    console.error("Forgot Password Error:", err);
-    res.status(500).json({ error: "Failed to process request", details: err.message });
+    const brevoError = err.response?.data || err.message;
+    console.error("Forgot Password Error:", brevoError);
+    res.status(500).json({ error: "Failed to process request", details: JSON.stringify(brevoError) });
   }
 });
 
