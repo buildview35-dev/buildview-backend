@@ -6,6 +6,7 @@ import { v2 as cloudinary } from "cloudinary";
 import crypto from "crypto";
 import admin from "firebase-admin";
 import axios from "axios";
+import nodemailer from "nodemailer";
 
 // Initialize Firebase Admin (If serviceAccountKey.json is missing, this will fail or require env vars)
 // We'll wrap it in a try-catch so the server still boots for image uploads if the key is missing.
@@ -131,10 +132,87 @@ app.post("/upload", upload.single("image"), async (req, res) => {
 const otpStore = new Map(); // Stores { email: { otp: string, expiresAt: number, verified: boolean } }
 
 const brevoConfig = {
-  apiKey: "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",
+  apiKey: "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",
+  smtpKey: "bskey5drwIBv3RU",
   senderEmail: "candari.arvin@gmail.com",
   senderName: "BuildView"
 };
+
+async function sendOtpViaBrevoApi(email, otp) {
+  return axios.post(
+    "https://api.brevo.com/v3/smtp/email",
+    {
+      sender: {
+        email: brevoConfig.senderEmail,
+        name: brevoConfig.senderName
+      },
+      to: [{ email }],
+      subject: "BuildView Password Reset OTP",
+      htmlContent: `
+        <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+          <h2>BuildView Password Reset</h2>
+          <p>Your one-time password is:</p>
+          <p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${otp}</p>
+          <p>This OTP will expire in 10 minutes.</p>
+        </div>
+      `
+    },
+    {
+      headers: {
+        "api-key": brevoConfig.apiKey,
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      timeout: 10000
+    }
+  );
+}
+
+async function sendOtpViaBrevoSmtp(email, otp) {
+  const transporters = [
+    nodemailer.createTransport({
+      host: "smtp-relay.brevo.com",
+      port: 2525,
+      secure: false,
+      auth: {
+        user: "apikey",
+        pass: brevoConfig.smtpKey
+      }
+    }),
+    nodemailer.createTransport({
+      host: "smtp-relay.brevo.com",
+      port: 2525,
+      secure: false,
+      auth: {
+        user: brevoConfig.senderEmail,
+        pass: brevoConfig.smtpKey
+      }
+    })
+  ];
+
+  let lastError;
+  for (const transporter of transporters) {
+    try {
+      return await transporter.sendMail({
+        from: `"${brevoConfig.senderName}" <${brevoConfig.senderEmail}>`,
+        to: email,
+        subject: "BuildView Password Reset OTP",
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+            <h2>BuildView Password Reset</h2>
+            <p>Your one-time password is:</p>
+            <p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${otp}</p>
+            <p>This OTP will expire in 10 minutes.</p>
+          </div>
+        `
+      });
+    } catch (smtpErr) {
+      lastError = smtpErr;
+    }
+  }
+
+  throw lastError || new Error("Brevo SMTP send failed");
+}
 
 /* -----------------------------
    OTP / Forgot Password Endpoints
@@ -150,39 +228,22 @@ app.post("/forgot-password", async (req, res) => {
 
     otpStore.set(email, { otp, expiresAt, verified: false });
 
-    // Send email via Brevo HTTP API (works on Render; no SMTP needed).
-    const response = await axios.post(
-      "https://api.brevo.com/v3/smtp/email",
-      {
-        sender: {
-          email: brevoConfig.senderEmail,
-          name: brevoConfig.senderName
-        },
-        to: [{ email }],
-        subject: "BuildView Password Reset OTP",
-        htmlContent: `
-          <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-            <h2>BuildView Password Reset</h2>
-            <p>Your one-time password is:</p>
-            <p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${otp}</p>
-            <p>This OTP will expire in 10 minutes.</p>
-          </div>
-        `
-      },
-      {
-        headers: {
-          "api-key": brevoConfig.apiKey,
-          Accept: "application/json",
-          "Content-Type": "application/json"
-        },
-        timeout: 10000
+    try {
+      const response = await sendOtpViaBrevoApi(email, otp);
+      if (response.status >= 200 && response.status < 300) {
+        return res.json({ success: true, message: "OTP sent successfully via Brevo API" });
       }
-    );
+      throw new Error(`Brevo API Error: ${JSON.stringify(response.data)}`);
+    } catch (apiErr) {
+      const apiErrorText = JSON.stringify(apiErr.response?.data || apiErr.message || "");
+      const needsSmtpFallback = apiErrorText.toLowerCase().includes("api key is not enabled");
 
-    if (response.status >= 200 && response.status < 300) {
-      res.json({ success: true, message: "OTP sent successfully via Brevo" });
-    } else {
-      throw new Error(`Brevo Error: ${JSON.stringify(response.data)}`);
+      if (!needsSmtpFallback) {
+        throw apiErr;
+      }
+
+      await sendOtpViaBrevoSmtp(email, otp);
+      return res.json({ success: true, message: "OTP sent successfully via Brevo SMTP fallback" });
     }
   } catch (err) {
     const brevoError = err.response?.data || err.message;
