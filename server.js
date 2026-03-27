@@ -155,6 +155,7 @@ app.post("/forgot-password", async (req, res) => {
     const response = await axios.post("https://api.emailjs.com/api/v1.0/email/send", {
       service_id: emailjsConfig.serviceId,
       template_id: emailjsConfig.templateId,
+      user_id: emailjsConfig.publicKey,
       accessToken: emailjsConfig.privateKey,
       template_params: {
         otp: otp,
