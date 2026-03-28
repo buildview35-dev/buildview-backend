@@ -20,14 +20,33 @@ const serviceAccountCandidates = [
 // Initialize Firebase Admin with local service account file when present.
 // Falls back to application default credentials.
 try {
+  const envServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
   const keyPath = serviceAccountCandidates.find((candidate) => fs.existsSync(candidate));
 
-  if (keyPath) {
-    const serviceAccount = JSON.parse(fs.readFileSync(keyPath, "utf8"));
+  if (envServiceAccount) {
+    const serviceAccount = JSON.parse(envServiceAccount);
+    if (typeof serviceAccount.private_key === "string") {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
+    }
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount)
     });
-    console.log(`Firebase Admin initialized using service account file: ${path.basename(keyPath)}`);
+    console.log(
+      `Firebase Admin initialized using FIREBASE_SERVICE_ACCOUNT env ` +
+      `(project_id=${serviceAccount.project_id}, key_id=${serviceAccount.private_key_id}, client_email=${serviceAccount.client_email})`
+    );
+  } else if (keyPath) {
+    const serviceAccount = JSON.parse(fs.readFileSync(keyPath, "utf8"));
+    if (typeof serviceAccount.private_key === "string") {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
+    }
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log(
+      `Firebase Admin initialized using service account file: ${path.basename(keyPath)} ` +
+      `(project_id=${serviceAccount.project_id}, key_id=${serviceAccount.private_key_id}, client_email=${serviceAccount.client_email})`
+    );
   } else {
     admin.initializeApp({
       credential: admin.credential.applicationDefault()
