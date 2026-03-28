@@ -448,6 +448,35 @@ app.post("/verify-signup-otp", async (req, res) => {
       return res.status(400).json({ error: "OTP purpose mismatch for signup flow" });
     }
 
+    otpStore.set(email, { ...storedData, verified: true });
+    return res.json({ success: true, message: "Sign up OTP verified successfully" });
+  } catch (err) {
+    console.error("Verify Signup OTP Error:", err);
+    return res.status(500).json({ error: "Failed to verify sign up OTP", details: err.message });
+  }
+});
+
+app.post("/complete-signup-verification", async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) {
+      return res.status(400).json({ error: "Email and OTP are required" });
+    }
+
+    const storedData = otpStore.get(email);
+    if (!storedData || !storedData.verified || storedData.otp !== otp) {
+      return res.status(401).json({ error: "Unauthorized request. Please verify OTP first." });
+    }
+
+    if (Date.now() > storedData.expiresAt) {
+      otpStore.delete(email);
+      return res.status(400).json({ error: "Session expired. Please start over." });
+    }
+
+    if (storedData.purpose && storedData.purpose !== "signup_verification") {
+      return res.status(400).json({ error: "OTP purpose mismatch for signup flow" });
+    }
+
     if (!admin.apps.length) {
       return res.status(500).json({ error: "Firebase Admin is not initialized on server" });
     }
@@ -456,10 +485,10 @@ app.post("/verify-signup-otp", async (req, res) => {
     await admin.auth().updateUser(userRecord.uid, { emailVerified: true });
     otpStore.delete(email);
 
-    return res.json({ success: true, message: "Sign up OTP verified successfully" });
+    return res.json({ success: true, message: "Sign up verification completed" });
   } catch (err) {
-    console.error("Verify Signup OTP Error:", err);
-    return res.status(500).json({ error: "Failed to verify sign up OTP", details: err.message });
+    console.error("Complete Signup Verification Error:", err);
+    return res.status(500).json({ error: "Failed to complete sign up verification", details: err.message });
   }
 });
 
