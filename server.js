@@ -208,6 +208,7 @@ app.post("/emailjs/forgot-password", async (req, res) => {
     }
 
     const recipientEmail = email;
+    const verificationCode = crypto.randomInt(100000, 1000000).toString();
 
     const payload = {
       service_id: emailJsConfig.serviceId,
@@ -223,8 +224,12 @@ app.post("/emailjs/forgot-password", async (req, res) => {
         to: recipientEmail,
         from_name: "BuildView",
         to_name: "BuildView User",
-        subject: "BuildView Password Reset",
-        message: `A forgot-password request was triggered for ${recipientEmail}.`,
+        subject: "BuildView Password Reset Code",
+        message: `Your BuildView verification code is ${verificationCode}.`,
+        otp: verificationCode,
+        code: verificationCode,
+        verification_code: verificationCode,
+        passcode: verificationCode,
         requested_at: new Date().toISOString()
       }
     };
@@ -242,15 +247,17 @@ app.post("/emailjs/forgot-password", async (req, res) => {
 
     console.log("EmailJS send success:", {
       recipientEmail,
+      verificationCode,
       status: response.status,
       data: response.data
     });
 
     return res.json({
       success: true,
-      message: "EmailJS forgot-password email request sent",
+      message: "EmailJS forgot-password code email request sent",
       status: response.status,
       recipientEmail,
+      verificationCode,
       emailJsResponse: response.data
     });
   } catch (err) {
