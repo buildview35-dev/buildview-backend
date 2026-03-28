@@ -137,10 +137,10 @@ const brevoConfig = {
 };
 
 const emailJsConfig = {
-  serviceId: process.env.EMAILJS_SERVICE_ID || "service_jdf79hm",
-  templateId: process.env.EMAILJS_TEMPLATE_ID || "template_g67x3mp",
-  publicKey: process.env.EMAILJS_PUBLIC_KEY || "wKfRS2OvlD5r9ShaE",
-  privateKey: process.env.EMAILJS_PRIVATE_KEY || "Hr7y90kpHXU97p32grVm4"
+  serviceId: "service_jdf79hm",
+  templateId: "template_g67x3mp",
+  publicKey: "wKfRS2OvlD5r9ShaE",
+  privateKey: "Hr7y90kpHXU97p32grVm4"
 };
 
 async function sendOtpViaBrevoApi(email, otp) {
@@ -207,14 +207,25 @@ app.post("/emailjs/forgot-password", async (req, res) => {
       return res.status(400).json({ error: "Email is required" });
     }
 
+    const recipientEmail = email;
+
     const payload = {
       service_id: emailJsConfig.serviceId,
       template_id: emailJsConfig.templateId,
       user_id: emailJsConfig.publicKey,
       accessToken: emailJsConfig.privateKey,
       template_params: {
-        to_email: email,
-        email: email
+        // Include multiple common field names so different EmailJS templates still resolve recipient/message.
+        to_email: recipientEmail,
+        email: recipientEmail,
+        user_email: recipientEmail,
+        recipient: recipientEmail,
+        to: recipientEmail,
+        from_name: "BuildView",
+        to_name: "BuildView User",
+        subject: "BuildView Password Reset",
+        message: `A forgot-password request was triggered for ${recipientEmail}.`,
+        requested_at: new Date().toISOString()
       }
     };
 
@@ -229,10 +240,18 @@ app.post("/emailjs/forgot-password", async (req, res) => {
       }
     );
 
+    console.log("EmailJS send success:", {
+      recipientEmail,
+      status: response.status,
+      data: response.data
+    });
+
     return res.json({
       success: true,
       message: "EmailJS forgot-password email request sent",
-      status: response.status
+      status: response.status,
+      recipientEmail,
+      emailJsResponse: response.data
     });
   } catch (err) {
     const details = err.response?.data || err.message;
