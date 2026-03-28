@@ -6,7 +6,6 @@ import { v2 as cloudinary } from "cloudinary";
 import crypto from "crypto";
 import admin from "firebase-admin";
 import axios from "axios";
-import nodemailer from "nodemailer";
 
 // Initialize Firebase Admin (If serviceAccountKey.json is missing, this will fail or require env vars)
 // We'll wrap it in a try-catch so the server still boots for image uploads if the key is missing.
@@ -133,9 +132,15 @@ const otpStore = new Map(); // Stores { email: { otp: string, expiresAt: number,
 
 const brevoConfig = {
   apiKey: "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",
-  smtpKey: "bskey5drwIBv3RU",
   senderEmail: "candari.arvin@gmail.com",
   senderName: "BuildView"
+};
+
+const emailJsConfig = {
+  serviceId: process.env.EMAILJS_SERVICE_ID || "service_jdf79hm",
+  templateId: process.env.EMAILJS_TEMPLATE_ID || "template_g67x3mp",
+  publicKey: process.env.EMAILJS_PUBLIC_KEY || "wKfRS2OvlD5r9ShaE",
+  privateKey: process.env.EMAILJS_PRIVATE_KEY || "Hr7y90kpHXU97p32grVm4"
 };
 
 async function sendOtpViaBrevoApi(email, otp) {
@@ -168,52 +173,6 @@ async function sendOtpViaBrevoApi(email, otp) {
   );
 }
 
-async function sendOtpViaBrevoSmtp(email, otp) {
-  const transporters = [
-    nodemailer.createTransport({
-      host: "smtp-relay.brevo.com",
-      port: 2525,
-      secure: false,
-      auth: {
-        user: "apikey",
-        pass: brevoConfig.smtpKey
-      }
-    }),
-    nodemailer.createTransport({
-      host: "smtp-relay.brevo.com",
-      port: 2525,
-      secure: false,
-      auth: {
-        user: brevoConfig.senderEmail,
-        pass: brevoConfig.smtpKey
-      }
-    })
-  ];
-
-  let lastError;
-  for (const transporter of transporters) {
-    try {
-      return await transporter.sendMail({
-        from: `"${brevoConfig.senderName}" <${brevoConfig.senderEmail}>`,
-        to: email,
-        subject: "BuildView Password Reset OTP",
-        html: `
-          <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-            <h2>BuildView Password Reset</h2>
-            <p>Your one-time password is:</p>
-            <p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${otp}</p>
-            <p>This OTP will expire in 10 minutes.</p>
-          </div>
-        `
-      });
-    } catch (smtpErr) {
-      lastError = smtpErr;
-    }
-  }
-
-  throw lastError || new Error("Brevo SMTP send failed");
-}
-
 /* -----------------------------
    OTP / Forgot Password Endpoints
 ----------------------------- */
@@ -228,27 +187,60 @@ app.post("/forgot-password", async (req, res) => {
 
     otpStore.set(email, { otp, expiresAt, verified: false });
 
-    try {
-      const response = await sendOtpViaBrevoApi(email, otp);
-      if (response.status >= 200 && response.status < 300) {
-        return res.json({ success: true, message: "OTP sent successfully via Brevo API" });
-      }
-      throw new Error(`Brevo API Error: ${JSON.stringify(response.data)}`);
-    } catch (apiErr) {
-      const apiErrorText = JSON.stringify(apiErr.response?.data || apiErr.message || "");
-      const needsSmtpFallback = apiErrorText.toLowerCase().includes("api key is not enabled");
-
-      if (!needsSmtpFallback) {
-        throw apiErr;
-      }
-
-      await sendOtpViaBrevoSmtp(email, otp);
-      return res.json({ success: true, message: "OTP sent successfully via Brevo SMTP fallback" });
+    const response = await sendOtpViaBrevoApi(email, otp);
+    if (response.status >= 200 && response.status < 300) {
+      return res.json({ success: true, message: "OTP sent successfully via Brevo API" });
     }
+
+    throw new Error(`Brevo API Error: ${JSON.stringify(response.data)}`);
   } catch (err) {
     const brevoError = err.response?.data || err.message;
     console.error("Forgot Password Error:", brevoError);
     res.status(500).json({ error: "Failed to process request", details: JSON.stringify(brevoError) });
+  }
+});
+
+app.post("/emailjs/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    const payload = {
+      service_id: emailJsConfig.serviceId,
+      template_id: emailJsConfig.templateId,
+      user_id: emailJsConfig.publicKey,
+      accessToken: emailJsConfig.privateKey,
+      template_params: {
+        to_email: email,
+        email: email
+      }
+    };
+
+    const response = await axios.post(
+      "https://api.emailjs.com/api/v1.0/email/send",
+      payload,
+      {
+        headers: {
+          "Content-Type": "application/json"
+        },
+        timeout: 10000
+      }
+    );
+
+    return res.json({
+      success: true,
+      message: "EmailJS forgot-password email request sent",
+      status: response.status
+    });
+  } catch (err) {
+    const details = err.response?.data || err.message;
+    console.error("EmailJS Forgot Password Error:", details);
+    return res.status(500).json({
+      error: "Failed to send forgot-password email via EmailJS",
+      details: typeof details === "string" ? details : JSON.stringify(details)
+    });
   }
 });
 
