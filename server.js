@@ -6,16 +6,34 @@ import { v2 as cloudinary } from "cloudinary";
 import crypto from "crypto";
 import admin from "firebase-admin";
 import axios from "axios";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-// Initialize Firebase Admin (If serviceAccountKey.json is missing, this will fail or require env vars)
-// We'll wrap it in a try-catch so the server still boots for image uploads if the key is missing.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const serviceAccountCandidates = [
+  path.join(__dirname, "serviceAccountKey.json"),
+  path.join(__dirname, "serviceAccountKey.json.json")
+];
+
+// Initialize Firebase Admin with local service account file when present.
+// Falls back to application default credentials.
 try {
-  // If the user places serviceAccountKey.json in the backend folder, it will be picked up.
-  // Otherwise, it might use default credentials if deployed on GCP.
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault() // Or require('./serviceAccountKey.json')
-  });
-  console.log("Firebase Admin initialized.");
+  const keyPath = serviceAccountCandidates.find((candidate) => fs.existsSync(candidate));
+
+  if (keyPath) {
+    const serviceAccount = JSON.parse(fs.readFileSync(keyPath, "utf8"));
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log(`Firebase Admin initialized using service account file: ${path.basename(keyPath)}`);
+  } else {
+    admin.initializeApp({
+      credential: admin.credential.applicationDefault()
+    });
+    console.log("Firebase Admin initialized using application default credentials.");
+  }
 } catch (e) {
   console.error("Firebase Admin initialization failed. Reset password won't work without credentials.", e);
 }
@@ -59,6 +77,7 @@ const upload = multer({
 app.get("/health", (req, res) => {
   res.json({
     ok: true,
+    firebaseAdminInitialized: admin.apps.length > 0,
     cloudinaryConfigured: Boolean(
       process.env.CLOUDINARY_CLOUD_NAME &&
       process.env.CLOUDINARY_API_KEY &&
