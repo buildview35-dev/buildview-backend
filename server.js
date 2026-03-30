@@ -87,7 +87,7 @@ app.use(express.json());
 ----------------------------- */
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB max
+  limits: { fileSize: 100 * 1024 * 1024 } // 100MB max for photos/videos
 });
 
 /* -----------------------------
@@ -107,25 +107,27 @@ app.get("/health", (req, res) => {
 });
 
 /* -----------------------------
-   Image Upload Endpoint
+   Media Upload Endpoint
 ----------------------------- */
 app.post("/upload", upload.single("image"), async (req, res) => {
   try {
 
     if (!req.file) {
       return res.status(400).json({
-        error: "No image file provided. Use form field 'image'."
+        error: "No media file provided. Use form field 'image'."
       });
     }
 
-    const folder = "buildview/avatars";
-    const publicId = `avatar_${Date.now()}`;
+    const mimeType = req.file.mimetype || "";
+    const resourceType = mimeType.startsWith("video/") ? "video" : "image";
+    const folder = "buildview/updates";
+    const publicId = `update_${resourceType}_${Date.now()}`;
 
     const stream = cloudinary.uploader.upload_stream(
       {
         folder: folder,
         public_id: publicId,
-        resource_type: "image"
+        resource_type: resourceType
       },
       (error, result) => {
 
@@ -142,6 +144,8 @@ app.post("/upload", upload.single("image"), async (req, res) => {
           secure_url: result.secure_url,
           url: result.url,
           public_id: result.public_id,
+          resource_type: result.resource_type,
+          mime_type: req.file.mimetype,
           original_filename: req.file.originalname
         });
       }
