@@ -87,7 +87,7 @@ app.use(express.json());
 ----------------------------- */
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 } // 100MB max for photos/videos
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB max
 });
 
 /* -----------------------------
@@ -107,27 +107,25 @@ app.get("/health", (req, res) => {
 });
 
 /* -----------------------------
-   Media Upload Endpoint
+   Image Upload Endpoint
 ----------------------------- */
 app.post("/upload", upload.single("image"), async (req, res) => {
   try {
 
     if (!req.file) {
       return res.status(400).json({
-        error: "No media file provided. Use form field 'image'."
+        error: "No image file provided. Use form field 'image'."
       });
     }
 
-    const mimeType = req.file.mimetype || "";
-    const resourceType = mimeType.startsWith("video/") ? "video" : "image";
-    const folder = "buildview/updates";
-    const publicId = `update_${resourceType}_${Date.now()}`;
+    const folder = "buildview/avatars";
+    const publicId = `avatar_${Date.now()}`;
 
     const stream = cloudinary.uploader.upload_stream(
       {
         folder: folder,
         public_id: publicId,
-        resource_type: resourceType
+        resource_type: "image"
       },
       (error, result) => {
 
@@ -144,8 +142,6 @@ app.post("/upload", upload.single("image"), async (req, res) => {
           secure_url: result.secure_url,
           url: result.url,
           public_id: result.public_id,
-          resource_type: result.resource_type,
-          mime_type: req.file.mimetype,
           original_filename: req.file.originalname
         });
       }
@@ -180,7 +176,8 @@ const brevoConfig = {
 
 const emailJsConfig = {
   serviceId: "service_jdf79hm",
-  templateId: "template_g67x3mp",
+  passwordResetTemplateId: "template_g67x3mp",
+  emailVerificationTemplateId: "template_7amd85o",
   publicKey: "wKfRS2OvlD5r9ShaE",
   privateKey: "Hr7y90kpHXU97p32grVm4"
 };
@@ -261,7 +258,7 @@ app.post("/emailjs/forgot-password", async (req, res) => {
 
     const payload = {
       service_id: emailJsConfig.serviceId,
-      template_id: emailJsConfig.templateId,
+      template_id: emailJsConfig.passwordResetTemplateId,
       user_id: emailJsConfig.publicKey,
       accessToken: emailJsConfig.privateKey,
       template_params: {
@@ -274,7 +271,7 @@ app.post("/emailjs/forgot-password", async (req, res) => {
         from_name: "BuildView",
         to_name: "BuildView User",
         subject: "BuildView Password Reset Code",
-        message: `Your BuildView verification code is ${verificationCode}.`,
+        message: `Your BuildView password reset code is ${verificationCode}.`,
         otp: verificationCode,
         code: verificationCode,
         verification_code: verificationCode,
@@ -340,7 +337,7 @@ app.post("/emailjs/signup-otp", async (req, res) => {
 
     const payload = {
       service_id: emailJsConfig.serviceId,
-      template_id: emailJsConfig.templateId,
+      template_id: emailJsConfig.emailVerificationTemplateId,
       user_id: emailJsConfig.publicKey,
       accessToken: emailJsConfig.privateKey,
       template_params: {
