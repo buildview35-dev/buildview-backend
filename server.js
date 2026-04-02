@@ -12,6 +12,9 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const FIREBASE_DATABASE_URL =
+  process.env.FIREBASE_DATABASE_URL ||
+  "https://buildviewcontruction-default-rtdb.asia-southeast1.firebasedatabase.app";
 const serviceAccountCandidates = [
   path.join(__dirname, "serviceAccountKey.json"),
   path.join(__dirname, "serviceAccountKey.json.json")
@@ -29,7 +32,8 @@ try {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
     }
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
+      credential: admin.credential.cert(serviceAccount),
+      databaseURL: FIREBASE_DATABASE_URL
     });
     console.log(
       `Firebase Admin initialized using FIREBASE_SERVICE_ACCOUNT env ` +
@@ -41,7 +45,8 @@ try {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
     }
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
+      credential: admin.credential.cert(serviceAccount),
+      databaseURL: FIREBASE_DATABASE_URL
     });
     console.log(
       `Firebase Admin initialized using service account file: ${path.basename(keyPath)} ` +
@@ -49,7 +54,8 @@ try {
     );
   } else {
     admin.initializeApp({
-      credential: admin.credential.applicationDefault()
+      credential: admin.credential.applicationDefault(),
+      databaseURL: FIREBASE_DATABASE_URL
     });
     console.log("Firebase Admin initialized using application default credentials.");
   }
@@ -114,18 +120,19 @@ app.post("/upload", upload.single("image"), async (req, res) => {
 
     if (!req.file) {
       return res.status(400).json({
-        error: "No image file provided. Use form field 'image'."
+        error: "No file provided. Use form field 'image'."
       });
     }
 
-    const folder = "buildview/avatars";
-    const publicId = `avatar_${Date.now()}`;
+    const isVideo = req.file.mimetype?.startsWith("video/");
+    const folder = "buildview/uploads";
+    const publicId = `${isVideo ? "video" : "image"}_${Date.now()}`;
 
     const stream = cloudinary.uploader.upload_stream(
       {
         folder: folder,
         public_id: publicId,
-        resource_type: "image"
+        resource_type: isVideo ? "video" : "image"
       },
       (error, result) => {
 
@@ -142,6 +149,7 @@ app.post("/upload", upload.single("image"), async (req, res) => {
           secure_url: result.secure_url,
           url: result.url,
           public_id: result.public_id,
+          resource_type: result.resource_type,
           original_filename: req.file.originalname
         });
       }
@@ -527,6 +535,120 @@ app.post("/reset-password", async (req, res) => {
   } catch (err) {
     console.error("Reset Password Error:", err);
     res.status(500).json({ error: "Failed to reset password", details: err.message });
+  }
+});
+
+app.post("/notify-project-update", async (req, res) => {
+  try {
+    const { projectId, updateId, description = "", uploadedByUid } = req.body;
+    if (!projectId || !uploadedByUid) {
+      return res.status(400).json({ error: "projectId and uploadedByUid are required" });
+    }
+
+    if (!admin.apps.length) {
+      return res.status(500).json({ error: "Firebase Admin is not initialized on server" });
+    }
+
+    const db = admin.database();
+    const projectSnapshot = await db.ref(`projects/${projectId}`).get();
+    if (!projectSnapshot.exists()) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const project = projectSnapshot.val() || {};
+    const recipientUids = new Set();
+    if (typeof project.ownerUid === "string" && project.ownerUid) {
+      recipientUids.add(project.ownerUid);
+    }
+    if (project.members && typeof project.members === "object") {
+      Object.keys(project.members).forEach((memberUid) => {
+        if (memberUid) recipientUids.add(memberUid);
+      });
+    }
+    recipientUids.delete(uploadedByUid);
+
+    if (recipientUids.size === 0) {
+      return res.json({ success: true, message: "No recipients for this project update", sentCount: 0 });
+    }
+
+    const usersSnapshot = await db.ref("users").get();
+    const users = [];
+    usersSnapshot.forEach((child) => {
+      users.push({
+        key: child.key,
+        ...child.val()
+      });
+    });
+
+    const uploader = users.find((user) => user.uid === uploadedByUid);
+    const uploaderName = [uploader?.firstName, uploader?.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim() || "Someone";
+    const projectName = (project.name || "your project").toString();
+    const projectLocation = (project.location || "").toString();
+    const projectOwnerUid = (project.ownerUid || "").toString();
+    const trimmedDescription = description.toString().trim();
+    const body = trimmedDescription
+      ? `${uploaderName} uploaded: ${trimmedDescription.slice(0, 100)}${trimmedDescription.length > 100 ? "..." : ""}`
+      : `${uploaderName} uploaded a new progress update.`;
+
+    const recipientTokens = [];
+    for (const user of users) {
+      if (!recipientUids.has(user.uid)) continue;
+      const tokens = user.notificationTokens && typeof user.notificationTokens === "object"
+        ? Object.values(user.notificationTokens).filter((token) => typeof token === "string" && token.trim())
+        : [];
+      recipientTokens.push(...tokens);
+    }
+
+    const uniqueTokens = [...new Set(recipientTokens)];
+    if (uniqueTokens.length === 0) {
+      return res.json({ success: true, message: "No registered device tokens for recipients", sentCount: 0 });
+    }
+
+    const baseData = {
+      type: "project_update",
+      projectId: String(projectId),
+      updateId: String(updateId || ""),
+      projectName,
+      projectLocation,
+      projectOwnerUid,
+      uploadedByUid: String(uploadedByUid),
+      title: `New update in ${projectName}`,
+      body
+    };
+
+    let successCount = 0;
+    let failureCount = 0;
+    for (let index = 0; index < uniqueTokens.length; index += 500) {
+      const chunk = uniqueTokens.slice(index, index + 500);
+      const response = await admin.messaging().sendEachForMulticast({
+        tokens: chunk,
+        data: baseData,
+        android: {
+          priority: "high"
+        }
+      });
+      successCount += response.successCount;
+      failureCount += response.failureCount;
+    }
+
+    return res.json({
+      success: true,
+      message: "Project update notifications processed",
+      projectId,
+      recipientCount: recipientUids.size,
+      tokenCount: uniqueTokens.length,
+      sentCount: successCount,
+      failureCount
+    });
+  } catch (err) {
+    console.error("Project Update Notification Error:", err);
+    return res.status(500).json({
+      error: "Failed to send project update notifications",
+      details: err.message
+    });
   }
 });
 
