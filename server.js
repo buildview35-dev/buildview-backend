@@ -10,6 +10,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import agoraToken from "agora-access-token";
+import "dotenv/config";
 
 const { RtcTokenBuilder, RtcRole } = agoraToken;
 
