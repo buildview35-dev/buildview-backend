@@ -9,7 +9,9 @@ import axios from "axios";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { RtcTokenBuilder, RtcRole } from "agora-access-token";
+import agoraToken from "agora-access-token";
+
+const { RtcTokenBuilder, RtcRole } = agoraToken;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
