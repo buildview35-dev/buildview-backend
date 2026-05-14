@@ -9,6 +9,7 @@ import axios from "axios";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { RtcTokenBuilder, RtcRole } from "agora-access-token";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -111,7 +112,59 @@ app.get("/health", (req, res) => {
     version: "1.0.1"
   });
 });
+/* -----------------------------
+   Agora Token Generation
+----------------------------- */
+app.post("/agora-token", (req, res) => {
+  try {
+    const { channelName, uid } = req.body;
+    if (!channelName || uid === undefined || uid === null) {
+      return res.status(400).json({ 
+        error: "channelName and uid are required",
+        details: "uid must be a valid number"
+      });
+    }
 
+    const appId = process.env.AGORA_APP_ID;
+    const appCertificate = process.env.AGORA_APP_CERTIFICATE;
+
+    if (!appId || !appCertificate) {
+      return res.status(500).json({ 
+        error: "Agora credentials not configured on server",
+        details: "AGORA_APP_ID and AGORA_APP_CERTIFICATE environment variables are required"
+      });
+    }
+
+    // Token expires in 24 hours
+    const expirationTimeInSeconds = 24 * 3600;
+    const currentTimestamp = Math.floor(Date.now() / 1000);
+    const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
+
+    // Generate token with BROADCASTER role
+    const token = RtcTokenBuilder.buildTokenWithUid(
+      appId,
+      appCertificate,
+      channelName,
+      parseInt(uid),
+      RtcRole.PUBLISHER, // PUBLISHER = BROADCASTER in live broadcasting
+      privilegeExpiredTs
+    );
+
+    return res.json({
+      success: true,
+      token,
+      channel: channelName,
+      uid: parseInt(uid),
+      expiresIn: expirationTimeInSeconds
+    });
+  } catch (err) {
+    console.error("Agora Token Generation Error:", err);
+    return res.status(500).json({ 
+      error: "Failed to generate Agora token",
+      details: err.message
+    });
+  }
+});
 /* -----------------------------
    Image Upload Endpoint
 ----------------------------- */
