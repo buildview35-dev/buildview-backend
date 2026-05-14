@@ -708,6 +708,119 @@ app.post("/notify-project-update", async (req, res) => {
   }
 });
 
+app.post("/notify-project-video-call", async (req, res) => {
+  try {
+    const { 
+      projectId, 
+      projectName, 
+      projectLocation, 
+      projectOwnerUid, 
+      channelName, 
+      startedByUid, 
+      startedByName 
+    } = req.body;
+
+    if (!projectId || !channelName || !startedByUid) {
+      return res.status(400).json({ error: "projectId, channelName, and startedByUid are required" });
+    }
+
+    if (!admin.apps.length) {
+      return res.status(500).json({ error: "Firebase Admin is not initialized on server" });
+    }
+
+    const db = admin.database();
+    const projectSnapshot = await db.ref(`projects/${projectId}`).get();
+    if (!projectSnapshot.exists()) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const project = projectSnapshot.val() || {};
+    const recipientUids = new Set();
+    
+    // Add owner
+    if (project.ownerUid && typeof project.ownerUid === "string") {
+      recipientUids.add(project.ownerUid);
+    }
+    
+    // Add members
+    if (project.members && typeof project.members === "object") {
+      Object.keys(project.members).forEach((uid) => {
+        if (uid) recipientUids.add(uid);
+      });
+    }
+
+    // Don't notify the starter
+    recipientUids.delete(startedByUid);
+
+    if (recipientUids.size === 0) {
+      return res.json({ success: true, message: "No recipients for this call", sentCount: 0 });
+    }
+
+    const usersSnapshot = await db.ref("users").get();
+    const users = [];
+    usersSnapshot.forEach((child) => {
+      users.push({ key: child.key, ...child.val() });
+    });
+
+    const recipientTokens = [];
+    for (const user of users) {
+      if (!recipientUids.has(user.uid)) continue;
+      const tokens = user.notificationTokens && typeof user.notificationTokens === "object"
+        ? Object.values(user.notificationTokens).filter(t => typeof t === "string" && t.trim())
+        : [];
+      recipientTokens.push(...tokens);
+    }
+
+    const uniqueTokens = [...new Set(recipientTokens)];
+    if (uniqueTokens.length === 0) {
+      return res.json({ success: true, message: "No registered device tokens for recipients", sentCount: 0 });
+    }
+
+    const payload = {
+      data: {
+        type: "project_video_call",
+        projectId: String(projectId),
+        projectName: String(projectName || ""),
+        projectLocation: String(projectLocation || ""),
+        projectOwnerUid: String(projectOwnerUid || ""),
+        channelName: String(channelName),
+        startedByUid: String(startedByUid),
+        startedByName: String(startedByName || "A team member"),
+        title: "Incoming Video Call",
+        body: `${startedByName || "A team member"} is calling you in ${projectName || "a project"}.`
+      },
+      android: {
+        priority: "high",
+        ttl: 0 // Expire immediately if not delivered
+      }
+    };
+
+    let successCount = 0;
+    let failureCount = 0;
+    
+    for (let i = 0; i < uniqueTokens.length; i += 500) {
+      const chunk = uniqueTokens.slice(i, i + 500);
+      const response = await admin.messaging().sendEachForMulticast({
+        tokens: chunk,
+        ...payload
+      });
+      successCount += response.successCount;
+      failureCount += response.failureCount;
+    }
+
+    return res.json({
+      success: true,
+      message: "Video call notifications processed",
+      sentCount: successCount,
+      failureCount
+    });
+
+  } catch (err) {
+    console.error("Video Call Notification Error:", err);
+    return res.status(500).json({ error: "Failed to send call notifications", details: err.message });
+  }
+});
+
 /* -----------------------------
    404 Handler
 ----------------------------- */
