@@ -7,7 +7,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "agora-access-token": "^2.0.9",
+    "agora-access-token": "^2.0.4",
     "axios": "^1.13.6",
     "cloudinary": "^2.9.0",
     "cors": "^2.8.6",
